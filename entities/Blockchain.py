@@ -4,9 +4,14 @@ import json
 import pickle
 from urllib.parse import urlparse
 
+from .Block import (
+    Block,
+    ComplexEncoder
+)
+from .Transaction import Transaction
 
 class Blockchain:
-    difficulty = 2
+    difficulty = 1
     def __init__(self):
         self.chain = []
         self.current_transactions = []
@@ -21,7 +26,7 @@ class Blockchain:
     def last_block(self):
         return self.chain[-1]
 
-    def add_block(self, block):
+    def add_block(self, block, proof):
         previous_hash = self.last_block.hash
         if previous_hash != block.previous_hash:
             return False
@@ -41,19 +46,15 @@ class Blockchain:
     def proof_of_work(self, block):
         block.nonce = 0
         computed_hash = block.compute_hash()
-        while not computed_hash.startswith('0' * Blockchain.difficulty):
-            block.nonce += 1
-            computed_hash = block.compute_hash()
+        # while not computed_hash.startswith('0' * Blockchain.difficulty):
+        #     block.nonce += 1
+        #     computed_hash = block.compute_hash()
         return computed_hash
 
-    def new_transaction(self, ts,sender, recipient, amount):
-
-        self.current_transactions.append({
-            'ts' : ts,
-            'sender': sender,
-            'recipient': recipient,
-            'amount': amount,
-        })
+    def new_transaction(self, filename, SELF_KEY):
+        tx = Transaction()
+        tx.add_payload(filename, SELF_KEY)
+        self.current_transactions.append(tx)
 
         return self.last_block.index + 1
 
@@ -63,13 +64,13 @@ class Blockchain:
         transactions to the blockchain by adding them to the block
         and figuring out Proof Of Work.
         """
-        if not self.unconfirmed_transactions:
+        if not self.current_transactions:
             return False
 
         last_block = self.last_block
 
         new_block = Block(index=last_block.index + 1,
-                          transactions=self.unconfirmed_transactions,
+                          transactions=self.current_transactions,
                           timestamp=time.time(),
                           previous_hash=last_block.hash)
 
@@ -77,7 +78,18 @@ class Blockchain:
         self.add_block(new_block, proof)
 
         self.current_transactions = []
-        return new_block.index
+        return new_block
+
+    def download_plugin(self, id, selfKey):
+        for block in self.chain:
+            print(json.dumps(block.toJSON(), cls=ComplexEncoder))
+            
+            tx = block.transactions
+            if tx and tx[0].id == id:
+                tx[0].payload_to_file(selfKey)
+
+    def toJSON(self):
+        return dict(chain=self.chain)
 
     def persist_chain(self):
         """

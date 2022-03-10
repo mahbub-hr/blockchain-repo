@@ -11,9 +11,11 @@ from flask import Flask, jsonify, request
 import threading
 import logging
 import copy
-from entities.Blockchain import Blockchain
-app = Flask(__name__)
-
+from entities import (
+    Blockchain,
+    Block,
+    Transaction
+)
 
 from base64 import (
     b64encode,
@@ -24,7 +26,9 @@ from Crypto.Hash import SHA256
 from Crypto.Signature import PKCS1_v1_5
 from Crypto.PublicKey import RSA
 
-logging.basicConfig(level=logging.INFO, format='[%(asctime)s] - %(message)s', datefmt='%H:%M:%S')
+app = Flask(__name__)
+
+logging.basicConfig(level=logging.INFO)
 
 
 
@@ -32,16 +36,8 @@ SELF_KEY = ""
 PREV_HASH=""
 bchain = Blockchain.Blockchain()
 PREV_HASH = bchain.chain[0].hash
-worldstate = blockchain.Worldstate()
 
 peers = []
-
-@app.route('/init_node', methods=['GET'])
-def initi_peer():
-
-    peer_insert(SELF_KEY)
-    
-    return "Peer Reset - Done", 200
 
 def peer_insert(p):
     if p not in peers:
@@ -54,7 +50,6 @@ def peer_update(peer):
     for p in peer:
         if p not in peers:
             peers.append(p)
-
 
 def get_my_key():
     if SELF_KEY == "":
@@ -109,10 +104,32 @@ def getchainsize():
     
     return json.dumps(f'{SELF_KEY},{OVERLAPPING},{num_of_shard},{element},{get_obj_size(bchain)}, {memory_usage_psutil()}\n'), 200
 
-#act as a orderer
-@app.route('/transactions/new', methods=['POST'])
+def get_block_from_DTO(block_DTO):
+        tx = Transaction.Transaction() 
+        tx.add_tx_data(block_DTO['tx_id'], block_DTO['tx_type'], block_DTO['tx_initiator'], block_DTO['tx_payload'])
+        transactions = []
+        transactions.append(tx)
+        block = Block.Block(block_DTO['index'], transactions, block_DTO['timestamp'], block_DTO['previous_hash'])
+        return block
+
+@app.route('/receive_block', methods=['POST'])
+def recieve_block():
+    new_block_DTO = request.get_json()
+    new_block = get_block_from_DTO(new_block_DTO)
+    bchain.add_block(new_block, "")
+    return {"status":200, "message": "Success"}
+
+@app.route('/mine', methods=['POST'])
 def new_transaction():
-    return
+    mined_block = bchain.mine()
+    peer_broadcast("/receive_block", data=mined_block.block_DTO(), exclude={})
+    return {"status":200, "message": "Success"}
+
+@app.route('/publish_plugin', methods=['POST'])
+def publish_plugin():
+    filename = request.get_json()["file"]
+    bchain.new_transaction(filename=filename, SELF_KEY=SELF_KEY)
+    return {"status":200, "message": "Success"}
 
 def verify_and_add_block(block_index):
     return
@@ -120,22 +137,22 @@ def verify_and_add_block(block_index):
 @app.route('/chain', methods=['GET'])
 def full_chain():
     chain_data = []
-    for block in bchain.chain:
-        chain_data.append(block.__dict__)
-
+    
     response = json.dumps(
-        {"length": len(chain_data),
-         "chain": chain_data,
-         "peers": peers,
-         "worldstate": worldstate.worldstate})
+        bchain.toJSON(), cls=Block.ComplexEncoder)
 
     return response
 
-@app.route('/printpeer')
-def showpeer():
-    global peers
-    logging.info(f"peers - {peers}")
-    return 'Printed', 200
+@app.route('/downloadPlugin', methods=['POST'])
+def download_plugin():
+    response = request.get_json()
+    plugin_id = response["id"]
+    try:
+        bchain.download_plugin(plugin_id, SELF_KEY)
+    except:
+        return {"status":210, "message":"Could not download the plugin"}
+
+    return {"status":200, "message":"Plugin downloaded successfully"}
 
 @app.route('/peer_update_on_registration', methods=['POST'])
 def reg_update():
@@ -146,6 +163,7 @@ def reg_update():
 # endpoint to add new peers to the network.
 @app.route('/register_node', methods=['POST'])
 def register_new_peers():
+    print(request)
     node_address = request.get_json()["node_address"]
     data = {
         'updated_peerlist': peers
@@ -155,11 +173,9 @@ def register_new_peers():
 
     # Add the node to the peer list
     peer_insert(node_address)
-    peer_broadcast('peer_update_on_registration', data, {SELF_KEY, node_address})
-    if IS_SHARDED:
-        return sharded_chain(node_address)
-    else:
-        return full_chain()
+    # peer_broadcast('peer_update_on_registration', data, {SELF_KEY, node_address})
+    
+    return full_chain()
 
 @app.route('/register_with', methods=['POST'])
 def register_with_existing_node():
@@ -181,155 +197,23 @@ def register_with_existing_node():
         global worldstate
         global LAST_INDEX
         # update chain and the peers
-        json_data = response.json()
-        chain_dump = json_data['chain']
+        # json_data = response.json()
+        # chain_dump = json_data['chain']
         
-        if IS_SHARDED:
-            t = json_data['tracker']
-            tracker.node_to_shard = t['node_to_shard']
-            tracker.shard_to_node = t['shard_to_node']
-        # need to remove if there is a seperate orderer
-        LAST_INDEX = bchain.chain[-1].index + 1
-        peer_update(json_data['peers'])
-        #print(peers)
-        worldstate.worldstate = json_data['worldstate']
         return jsonify("Registration successful"), 200
     else:
         # if something goes wrong, pass it on to the API response
         return response.content, response.status_code
 
-
-@app.route('/sendnewnodeinfo', methods=['POST'])
-def get_new_node_info():
-    global tracker
-    response = request.get_json()
-    track = response['track']
-    tracker_ = response['tracker']
-    node_address = response['node_address']
-    tracker.node_to_shard=tracker_['node_to_shard']
-    tracker.shard_to_node=tracker_['shard_to_node']
-    peer_insert(node_address)
-
-    node_to_shard = track['node_to_shard']
-    if SELF_KEY not in node_to_shard:
-        return "get new node info returned wihtout sending any shard"
-    shards = bchain.remove_multiple_shards(node_to_shard[SELF_KEY], SHARD_SIZE)
-    #logging.info(f"{send_shard_to(shards, node_address)}")
-    return 'get new node info returned', 200
-
-def create_chain_from_dump(chain_dump):
-    generated_blockchain = blockchain.Blockchain()
-    # generated_blockchain.create_genesis_block()
-    for idx, block_data in enumerate(chain_dump):
-        if idx == 0 and not IS_SHARDED:
-            continue  # skip genesis block
-        block = blockchain.Block(block_data["index"],
-                                 block_data["transactions"],
-                                 block_data["timestamp"],
-                                 block_data["previous_hash"])
-        block.hash = block_data['hash']
-        if IS_SHARDED:
-            #integraty check is not performed
-
-            added= generated_blockchain.add_block_on_shard(block,'')
-        else:
-            added = generated_blockchain.add_block(block)
-
-        if not added:
-            raise Exception("The chain dump is tampered!!")
-    return generated_blockchain
-
-@app.route('/txbysender', methods=['POST'])
-def txbysender():
-    data = request.get_json()
-    sender = data['sender']
-    shard = data['shard']
-
-    tx_list = tx_in_shard_by_sender(sender, shard)
-    return json.dumps({'tx': tx_list})
-
-
-@app.route("/wholeshardquery", methods=['POST'])
-def wholeshardquery():
-    data = request.get_json()
-    sender = data['sender']
-    tx = []
-    time_stats = {}
-    start = time.time()
-
-    for shard in tracker.shard_to_node:
-        peer = tracker.shard_to_node[shard][0]
-
-        if (peer != SELF_KEY) and tracker.node_to_shard[peer]:
-            data['shard'] = shard
-            s = time.time()
-            response = requests.post(peer + "txbysender", json=data, headers={"Content-Type": 'application/json'})
-            e = time.time()
-            tx.extend(response.json()['tx'])
-        else:
-            s = time.time()
-            tx.extend(tx_in_shard_by_sender(sender, shard))
-            e = time.time()
-        
-        stats ={}
-        stats['peer'] = peer
-        stats['time'] = e - s
-        time_stats[shard] = stats
-
-    end = time.time()
-    total_elapsed = end-start
-
-    time_stats['total'] = total_elapsed
-    response= {
-                "tx":tx,
-                "time_stats":time_stats
-                }
-
-    return json.dumps(response),200
-
-
-@app.route("/query", methods=['POST'])
-def query():
-    data = request.get_json()
-    return repr(worldstate.get(data['key'])), 200
-
-
-@app.route("/printworldstate", methods=['GET'])
-def printWorldstate():
-    worldstate.print()
-    return "print worldstate"
-
-@app.route('/printtracker',methods=['GET'])
-def print_tracker():
-    tracker.print()
-    return 'print tracker'
-
-@app.route("/printchainwithtxs", methods=['GET'])
-def printchainwithtxs():
-    logging.info(f"Total Blocks - {len(bchain.chain)} Current chain - ")
-    for block in bchain.chain:
-        print(json.dumps(block.__dict__, indent=4))
-
-    return "print chain"
-
-@app.route("/printchain", methods=['GET'])
-def printchain():
-    logging.info(f"Total Blocks - {len(bchain.chain)} Current chain - ")
-    for block in bchain.chain:
-        temp_block = copy.deepcopy(block.__dict__)
-        del temp_block["transactions"]
-        print(json.dumps(temp_block, indent=4))
-    return "print chain without txs"
-
-
 def peer_broadcast_thread(url, data, header={"Content-Type": 'application/json'}):
     response = requests.post(url, json = data, headers=header)
-    #logging.info(f"response of broadcast from {url} - {response.content}")
+    logging.info(f"response of broadcast from {url} - {response.content}")
 
 def peer_broadcast(url, data, exclude, header={"Content-Type": 'application/json'}):
     for peer in peers:
-        if peer not in exclude:
-            t = threading.Thread(target=peer_broadcast_thread, args=(peer+url, data, header, ))
+        if peer not in exclude and peer != SELF_KEY:
+            logging.info(f"Sending update to : {peer}")
+            t = threading.Thread(target=peer_broadcast_thread, args=("http://"+peer+url, data, header, ))
             t.start()
     return "peer broadcast returned"
 
@@ -339,6 +223,12 @@ def home():
     return "<html>\
                 <body><h1> Welcome to Homepage</h1></body>\
             </html>"
+            
+@app.route('/printpeer')
+def showpeer():
+    global peers
+    logging.info(f"peers - {peers}")
+    return 'Printed', 200
 
 def get_host_ip():
     try:
@@ -349,11 +239,6 @@ def get_host_ip():
         return ip
     except:
         logging.info(f"can not get host name and ip address")
-
-def get_ext_ip():
-    ip = requests.get('https://api.ipify.org').text 
-    logging.info(f'My public IP address is: {ip}')
-    return ip
 
 def shutdown_server():
     func = request.environ.get('werkzeug.server.shutdown')

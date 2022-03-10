@@ -1,4 +1,7 @@
+import logging
+
 from service import peer
+TEST = 1
 
 if __name__ == '__main__':
     from argparse import ArgumentParser
@@ -10,9 +13,15 @@ if __name__ == '__main__':
     port = args.port
     NODE_NUMBER = port
     # NODE_NUMBER = args.node
-    host_ip =  get_host_ip()
+    host_ip =  peer.get_host_ip()
     
-    SELF_KEY = "http://" + get_ext_ip() + ":" + repr(port)+"/"
-    logging.info(f"SELF_KEY - {SELF_KEY}")
-    peer_insert(get_my_key())
-    app.run(host=host_ip, port=port, debug=True, threaded=False)
+    peer.SELF_KEY = "localhost:" + repr(port)
+
+    logging.info(f"SELF_KEY - {peer.SELF_KEY}")
+
+    if(TEST):
+        peer.peer_update(["localhost:5000", "localhost:5001"])
+    else:
+        peer.peer_insert(peer.get_my_key())
+
+    peer.app.run(port=port, debug=True, threaded=False)
