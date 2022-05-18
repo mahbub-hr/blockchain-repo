@@ -56,60 +56,14 @@ def get_my_key():
         logging.info(f"key is not set")
         return ""
     return SELF_KEY
-
-@app.route('/ps_util', methods=['GET'])
-def memory_usage_psutil():
-    # return the memory usage in MB
-    
-    process = psutil.Process(os.getpid())
-    mem = (process.memory_info()[0])/float(2**20) 
-    return mem
-
-def get_obj_size(obj):
-    marked = {id(obj)}
-    obj_q = [obj]
-    sz = 0
-
-    while obj_q:
-        sz += sum(map(sys.getsizeof, obj_q))
-
-        # Lookup all the object referred to by the object in obj_q.
-        # See: https://docs.python.org/3.7/library/gc.html#gc.get_referents
-        all_refr = ((id(o), o) for o in gc.get_referents(*obj_q))
-
-        # Filter object that are already marked.
-        # Using dict notation will prevent repeated objects.
-        new_refr = {o_id: o for o_id, o in all_refr if o_id not in marked and not isinstance(o, type)}
-
-        # The new obj_q will be the ones that were not marked,
-        # and we will update marked with their ids so we will
-        # not traverse them again.
-        obj_q = new_refr.values()
-        marked.update(new_refr.keys())
-
-    return sz
-
-@app.route('/getsize', methods=['GET'])
-def getchainsize():
-    #global bchain
-    #block_size = get_obj_size(bchain.chain[1])
-    if SELF_KEY in tracker.node_to_shard:
-        num_of_shard = len(tracker.node_to_shard[SELF_KEY])
-        
-    else:
-        num_of_shard =0
-       
-
-    element = len(bchain.chain)
-    
-    return json.dumps(f'{SELF_KEY},{OVERLAPPING},{num_of_shard},{element},{get_obj_size(bchain)}, {memory_usage_psutil()}\n'), 200
-
+ 
 def get_block_from_DTO(block_DTO):
         tx = Transaction.Transaction() 
         tx.add_tx_data(block_DTO['tx_id'], block_DTO['tx_type'], block_DTO['tx_initiator'], block_DTO['tx_payload'])
         transactions = []
         transactions.append(tx)
         block = Block.Block(block_DTO['index'], transactions, block_DTO['timestamp'], block_DTO['previous_hash'])
+        block.compute_hash()
         return block
 
 @app.route('/receive_block', methods=['POST'])
@@ -191,15 +145,6 @@ def register_with_existing_node():
                              json=data, headers=headers)
 
     if response.status_code == 200:
-        global bchain
-        #this is in master
-        global peers
-        global worldstate
-        global LAST_INDEX
-        # update chain and the peers
-        # json_data = response.json()
-        # chain_dump = json_data['chain']
-        
         return jsonify("Registration successful"), 200
     else:
         # if something goes wrong, pass it on to the API response
@@ -220,8 +165,8 @@ def peer_broadcast(url, data, exclude, header={"Content-Type": 'application/json
 @app.route("/", methods=['GET'])
 def home():
     print("tested ")
-    return "<html>\
-                <body><h1> Welcome to Homepage</h1></body>\
+    return f"<html>\
+                <body><h1> Welcome to Homepage</h1><p>{SELF_KEY}</p></body>\
             </html>"
             
 @app.route('/printpeer')

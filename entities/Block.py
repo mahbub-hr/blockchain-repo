@@ -10,7 +10,8 @@ class Block:
 
     def compute_hash(self):
         block_string = json.dumps(self.toJSON(), cls=ComplexEncoder,sort_keys=True)  # The string equivalent also considers the previous_hash field now
-        return sha256(block_string.encode()).hexdigest()
+        self.hash = sha256(block_string.encode()).hexdigest()
+        return self.hash
 
     def persist_bock(self):
         filename = repr(self.index) + ".block"
