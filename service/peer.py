@@ -127,7 +127,7 @@ def register_new_peers():
 
     # Add the node to the peer list
     peer_insert(node_address)
-    # peer_broadcast('peer_update_on_registration', data, {SELF_KEY, node_address})
+    peer_broadcast('peer_update_on_registration', data, {SELF_KEY, node_address})
     
     return full_chain()
 
@@ -139,6 +139,7 @@ def register_with_existing_node():
         return "Invalid data", 400
 
     data = {"node_address": request.host_url}
+    print(node_address)
     headers = {'Content-Type': "application/json"}
 
     response = requests.post(node_address + "/register_node",

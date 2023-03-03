@@ -1,3 +1,7 @@
-authtoken: 
-  localhost:5000: 27xSqPdAj1KdZIa4Vv9bzuVL84L_374NZfpQSfweNdKt3oax9
-  localhost:5001: 28HeG8e7J3RPISHgvws7HaUiyWJ_7PgdRieYh21YkiUZ7zrmL
+authtoken: 28HeG8e7J3RPISHgvws7HaUiyWJ_7PgdRieYh21YkiUZ7zrmL
+tunnels:
+    localhost:5000:
+        proto: http
+        addr: 5000
+version: "2"
+region: us

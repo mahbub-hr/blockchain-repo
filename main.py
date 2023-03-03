@@ -1,6 +1,6 @@
 import logging
 from service import peer
-from flask_ngrok import start_ngrok
+from service.flask_ngrok import start_ngrok, _is_ngrok_running
 import subprocess
 from pathlib import Path
 import yaml
@@ -43,6 +43,7 @@ def readAuthtoken():
     return authtoken[peer.SELF_KEY]
 
 
+
 if __name__ == '__main__':
     from argparse import ArgumentParser
 
@@ -64,7 +65,9 @@ if __name__ == '__main__':
     else:
         peer.peer_insert(peer.get_my_key())
 
-    # setAuthtoken(readAuthtoken())
-    public_url = start_ngrok()
-    readConfigFile()
+    # if _is_ngrok_running() == False:
+    #     public_url = start_ngrok()
+    # else:
+    #     print("Already running")
+    # readConfigFile()
     peer.app.run(port=port, debug=True, threaded=False)
